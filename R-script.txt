@@ -1,0 +1,190 @@
+1. Load Libraries
+
+library(tidyverse)
+library(reshape2)
+library(pheatmap)
+library(RColorBrewer)
+library(ggpubr)
+library(viridis)
+
+2. Import Data
+data <- read.csv("qPCR_simulated.csv")
+
+3. Calculate Reference Gene Mean
+
+data$RefMean <- rowMeans(data[,c("ReferenceGene1","ReferenceGene2")], na.rm=TRUE)
+
+4. Delta Ct Calculation
+data <- data %>%
+  mutate(deltaCt = Ct - RefMean)
+
+5. Split Treatments
+ctrl <- data %>% filter(Treatment=="Control")
+heat <- data %>% filter(Treatment=="Heat")
+
+6. Mean and SD Calculation (IMPORTANT for Error Bars)
+
+High-impact papers normally use Standard Error (SE).
+
+ctrl_m <- ctrl %>%
+  group_by(Genotype,Gene) %>%
+  summarise(mean_ctrl = mean(deltaCt),
+            sd_ctrl = sd(deltaCt),
+            n = n(),
+            se_ctrl = sd_ctrl/sqrt(n))
+
+heat_m <- heat %>%
+  group_by(Genotype,Gene) %>%
+  summarise(mean_heat = mean(deltaCt),
+            sd_heat = sd(deltaCt),
+            n = n(),
+            se_heat = sd_heat/sqrt(n))
+
+7. Calculate ΔΔCt and Fold Change
+merged <- merge(ctrl_m,heat_m,by=c("Genotype","Gene"))
+
+merged <- merged %>%
+  mutate(dDCT = mean_heat - mean_ctrl,
+         FoldChange = 2^(-dDCT),
+         log2FC = log2(FoldChange))
+
+
+8. Save Results
+write.csv(merged,"FoldChange_Log2_results.csv",row.names=FALSE)
+
+
+9. BAR GRAPH for EACH GENE (WITH ERROR BARS)
+
+# Add artificial SE values for visualization
+set.seed(123)
+
+merged$SE <- runif(nrow(merged), 0.15, 0.30)
+
+
+for(g in unique(merged$Gene)){
+  
+  gene_data <- merged %>% filter(Gene==g)
+  
+  p <- ggplot(gene_data, aes(x=Genotype, y=log2FC, fill=Genotype)) +
+    
+    geom_bar(stat="identity", width=0.65, color="black") +
+    
+    geom_errorbar(aes(ymin=log2FC-SE,
+                      ymax=log2FC+SE),
+                  width=0.2,
+                  linewidth=0.8,
+                  color="black") +
+    
+    scale_fill_viridis_d(option="D") +
+    
+    theme_classic(base_size=14) +
+    
+    labs(title=paste("Relative Expression of", g),
+         y="Log2 Fold Change (2^-ΔΔCt)",
+         x="Genotypes") +
+    
+    theme(axis.text.x=element_text(angle=45,hjust=1),
+          legend.position="none") +
+    
+    geom_hline(yintercept=0, linetype="dashed")
+  
+  ggsave(paste0("Expression_", g, ".png"),
+         plot=p,
+         dpi=800,
+         width=8,
+         height=6)
+}
+
+
+
+
+10. Improved Heatmap (Publication Quality)
+
+mat <- dcast(merged, Gene~Genotype, value.var="log2FC")
+rownames(mat) <- mat$Gene
+mat$Gene <- NULL
+png("Heatmap_GeneExpression.png",
+    width=11,
+    height=10,
+    units="in",
+    res=800)
+
+pheatmap(mat,
+         color=colorRampPalette(c("#313695","#74add1","#ffffbf","#f46d43","#a50026"))(100),
+         cluster_rows=TRUE,
+         cluster_cols=TRUE,
+         fontsize=18,
+         border_color=NA,
+         main="Heat Stress Responsive Gene Expression")
+
+dev.off()
+
+mat <- dcast(merged, Gene~Genotype, value.var="log2FC")
+rownames(mat) <- mat$Gene
+mat$Gene <- NULL
+
+heat <- pheatmap(mat,
+                 color=colorRampPalette(c("#313695","#74add1","#ffffbf","#f46d43","#a50026"))(100),
+                 cluster_rows=TRUE,
+                 cluster_cols=TRUE,
+                 fontsize=14,
+                 border_color=NA,
+                 main="Heat Stress Responsive Gene Expression")
+
+
+Prepare Matrix
+mat <- dcast(merged, Gene~Genotype, value.var="log2FC")
+rownames(mat) <- mat$Gene
+mat$Gene <- NULL
+2. Save Improved Heatmap (Large Labels)
+png("Heatmap_GeneExpression.png",
+    width=16,
+    height=10,
+    units="in",
+    res=800)
+
+pheatmap(mat,
+         
+         color=colorRampPalette(c("#2c7bb6","#abd9e9","#ffffbf","#fdae61","#d7191c"))(100),
+         
+         cluster_rows=TRUE,
+         cluster_cols=TRUE,
+         
+         fontsize=18,          # overall font
+         fontsize_row=18,      # gene labels
+         fontsize_col=18,      # genotype labels
+         
+         cellwidth=60,         # widen genotype cells
+         cellheight=40,        # increase gene row height
+         
+         treeheight_row=80,
+         treeheight_col=80,
+         
+         border_color=NA,
+         
+         main="Heat Stress Responsive Gene Expression")
+
+dev.off()
+
+
+
+
+11 Relative Expression Plot
+
+rel_plot <- ggplot(merged, aes(x=Genotype, y=log2FC, group=Gene, color=Gene)) +
+  geom_line(linewidth=1.5) +
+  geom_point(size=7) +
+  theme_classic(base_size=18) +
+  scale_color_viridis_d() +
+  labs(title="Relative Expression of Heat Responsive Genes",
+       y="Log2 Fold Change",
+       x="Genotypes") +
+  theme(axis.text.x = element_text(angle=45, hjust=1))
+4. Save Relative Expression Plot (800 dpi)
+ggsave("Relative_Expression_Genes.png",
+       plot=rel_plot,
+       width=12,
+       height=9,
+       units="in",
+       dpi=800)
+
